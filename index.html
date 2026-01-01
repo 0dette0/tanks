@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang='ru'>
+<head>
+    <meta charset='UTF-8'>
+    <title>GHO_TANKS_2026</title>
+    <style>
+        body { background: #0a0a0a; color: #00ff41; font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; }
+        #ui { background: rgba(0, 20, 0, 0.9); border: 1px solid #0f0; padding: 20px; box-shadow: 0 0 15px #0f0; text-align: center; z-index: 10; }
+        textarea { background: #000; color: #0f0; border: 1px solid #0f0; width: 300px; height: 80px; margin: 10px 0; font-size: 10px; resize: none; }
+        button { background: #0f0; color: #000; border: none; padding: 10px 20px; cursor: pointer; font-weight: bold; margin: 5px; text-transform: uppercase; }
+        button:hover { background: #fff; }
+        canvas { background: #000; border: 1px solid #333; display: none; }
+        .status { font-size: 12px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+<div id='ui'>
+    <h2 style='margin-top:0'>TANK_LINK_v1.0</h2>
+    <div class='status' id='status'>ИНИЦИАЛИЗАЦИЯ...</div>
+    
+    <p>1. СОЗДАЙ КОД И КИНЬ ДРУГУ:</p>
+    <button onclick='initHost()'>СОЗДАТЬ КОД (HOST)</button><br>
+    <textarea id='outCode' readonly></textarea>
+
+    <p>2. ВСТАВЬ КОД ДРУГА И ЖМИ CONNECT:</p>
+    <textarea id='inCode' placeholder='ВСТАВЬ ТУТ...'></textarea><br>
+    <button onclick='connect()'>ПОДКЛЮЧИТЬСЯ (JOIN)</button>
+</div>
+
+<canvas id='gameCanvas' width='800' height='600'></canvas>
+
+<script>
+    const pc = new RTCPeerConnection({iceServers: [{urls: 'stun:stun.l.google.com:19302'}]});
+    let dc;
+    const status = document.getElementById('status');
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    pc.onicecandidate = e => {
+        if (!e.candidate) {
+            document.getElementById('outCode').value = btoa(JSON.stringify(pc.localDescription));
+            status.innerText = 'КОД СФОРМИРОВАН. ОТПРАВЛЯЙ!';
+        }
+    };
+
+    pc.ondatachannel = e => { dc = e.channel; setupDC(); };
+
+    async function initHost() {
+        dc = pc.createDataChannel('game');
+        setupDC();
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        status.innerText = 'ГЕНЕРАЦИЯ КОДА...';
+    }
+
+    async function connect() {
+        const input = document.getElementById('inCode').value;
+        if(!input) return;
+        const desc = new RTCSessionDescription(JSON.parse(atob(input)));
+        await pc.setRemoteDescription(desc);
+        if (desc.type === 'offer') {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            status.innerText = 'ОТВЕТ ГОТОВ. КИНЬ ЕГО ПЕРВОМУ!';
+        } else {
+            status.innerText = 'СОЕДИНЕНИЕ...';
+        }
+    }
+
+    function setupDC() {
+        dc.onopen = () => {
+            document.getElementById('ui').style.display = 'none';
+            canvas.style.display = 'block';
+            loop();
+        };
+        dc.onmessage = e => { enemy = JSON.parse(e.data); };
+    }
+
+    let me = {x: 100, y: 300, a: 0, c: '#0f0'};
+    let enemy = {x: 700, y: 300, a: 180, c: '#f00'};
+    let keys = {};
+
+    window.onkeydown = e => keys[e.code] = true;
+    window.onkeyup = e => keys[e.code] = false;
+
+    function loop() {
+        if(keys['KeyW'] || keys['ArrowUp']) { me.x += Math.cos(me.a*Math.PI/180)*4; me.y += Math.sin(me.a*Math.PI/180)*4; }
+        if(keys['KeyA'] || keys['ArrowLeft']) me.a -= 5;
+        if(keys['KeyD'] || keys['ArrowRight']) me.a += 5;
+
+        if(dc.readyState === 'open') dc.send(JSON.stringify(me));
+
+        ctx.clearRect(0,0,800,600);
+        drawTank(me);
+        drawTank(enemy);
+        requestAnimationFrame(loop);
+    }
+
+    function drawTank(t) {
+        ctx.save();
+        ctx.translate(t.x, t.y); ctx.rotate(t.a*Math.PI/180);
+        ctx.fillStyle = t.c; ctx.fillRect(-15,-10,30,20);
+        ctx.fillStyle = '#fff'; ctx.fillRect(10,-2,10,4);
+        ctx.restore();
+    }
+</script>
+</body>
+</html>
