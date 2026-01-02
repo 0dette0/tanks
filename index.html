@@ -2,95 +2,123 @@
 <html lang='ru'>
 <head>
     <meta charset='UTF-8'>
-    <title>GHO_TANKS_BATTLE_2026</title>
+    <title>HideAndSeek_Refined</title>
     <style>
-        body { background: #0a0a0a; color: #00ff41; font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; }
-        #ui { background: rgba(0, 20, 0, 0.9); border: 1px solid #0f0; padding: 20px; box-shadow: 0 0 15px #0f0; text-align: center; z-index: 10; }
-        textarea { background: #000; color: #0f0; border: 1px solid #0f0; width: 300px; height: 80px; margin: 10px 0; font-size: 10px; resize: none; }
-        button { background: #0f0; color: #000; border: none; padding: 10px 20px; cursor: pointer; font-weight: bold; margin: 5px; text-transform: uppercase; }
-        canvas { background: #000; border: 1px solid #333; display: none; cursor: crosshair; }
-        .status { font-size: 12px; margin-bottom: 10px; }
+        body { background: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin: 0; overflow: hidden; }
+        #ui { background: #222; padding: 10px; width: 100%; display: flex; justify-content: space-around; border-bottom: 2px solid #444; }
+        #setup { position: absolute; top: 30%; background: #333; padding: 20px; border: 2px solid #555; z-index: 1000; text-align: center; }
+        textarea { width: 160px; height: 40px; margin: 5px; font-size: 10px; }
+        canvas { background: #000; border: 3px solid #333; margin-top: 10px; }
+        .btn { background: #444; color: #fff; border: 1px solid #777; padding: 10px; cursor: pointer; }
+        .btn:hover { background: #555; }
     </style>
 </head>
 <body>
 
-<div id='ui'>
-    <h2 style='margin-top:0'>TANK_BATTLE_v1.1</h2>
-    <div class='status' id='status'>ОЖИДАНИЕ...</div>
-    <button onclick='initHost()'>HOST CODE</button><br>
-    <textarea id='outCode' readonly></textarea>
-    <textarea id='inCode' placeholder='PASTE HERE...'></textarea><br>
-    <button onclick='connect()'>CONNECT</button>
+<div id='setup'>
+    <h3>P2P HIDE & SEEK</h3>
+    <button class='btn' onclick='initHost()'>HOST</button>
+    <textarea id='outCode' readonly placeholder='MY CODE'></textarea>
+    <textarea id='inCode' placeholder='ENEMY CODE'></textarea>
+    <button class='btn' onclick='connect()'>CONNECT</button>
+    <button class='btn' onclick='debugMode()' style='background:#442222'>SOLO TEST</button>
+</div>
+
+<div id='ui' style='display:none'>
+    <div>TIME: <span id='timer'>0</span>s</div>
+    <div>MY TAG TIME: <span id='myT'>0</span>s</div>
+    <div>ENEMY TAG TIME: <span id='enT'>0</span>s</div>
+    <div id='hCtrl' style='display:none'>
+        <input type='number' id='dur' value='60' style='width:40px'>s
+        <button class='btn' onclick='startGame()'>START</button>
+    </div>
 </div>
 
 <canvas id='gameCanvas' width='800' height='600'></canvas>
 
 <script>
+    const canvas = document.getElementById('gameCanvas'), ctx = canvas.getContext('2d');
     const pc = new RTCPeerConnection({iceServers: [{urls: 'stun:stun.l.google.com:19302'}]});
-    let dc;
-    const status = document.getElementById('status');
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
+    let dc, isHost = false, gameActive = false, buildMode = true, isDebug = false;
+    let walls = [], boosts = [], timeLeft = 0, size = 30;
 
     pc.onicecandidate = e => { if (!e.candidate) document.getElementById('outCode').value = btoa(JSON.stringify(pc.localDescription)); };
     pc.ondatachannel = e => { dc = e.channel; setupDC(); };
+    async function initHost() { isHost = true; dc = pc.createDataChannel('game'); setupDC(); await pc.setLocalDescription(await pc.createOffer()); document.getElementById('hCtrl').style.display='block'; }
+    async function connect() { const v = document.getElementById('inCode').value; if(!v) return; const d = new RTCSessionDescription(JSON.parse(atob(v))); await pc.setRemoteDescription(d); if(d.type === 'offer') await pc.setLocalDescription(await pc.createAnswer()); }
+    function debugMode() { isDebug = true; isHost = true; document.getElementById('setup').style.display='none'; document.getElementById('ui').style.display='flex'; document.getElementById('hCtrl').style.display='block'; loop(); }
+    function setupDC() { dc.onopen = () => { document.getElementById('setup').style.display='none'; document.getElementById('ui').style.display='flex'; loop(); }; dc.onmessage = e => { const d = JSON.parse(e.data); enemy = d.p; walls = d.w; boosts = d.b; timeLeft = d.t; gameActive = d.ga; }; }
 
-    async function initHost() {
-        dc = pc.createDataChannel('game');
-        setupDC();
-        await pc.setLocalDescription(await pc.createOffer());
-    }
+    let me = {x: 100, y: 100, tag: false, tTime: 0, speed: 4, inv: 0, color: '#0f0'};
+    let enemy = {x: 600, y: 400, tag: false, tTime: 0, inv: 0, color: '#f00'};
+    const keys = {};
 
-    async function connect() {
-        const input = document.getElementById('inCode').value;
-        if(!input) return;
-        const desc = new RTCSessionDescription(JSON.parse(atob(input)));
-        await pc.setRemoteDescription(desc);
-        if (desc.type === 'offer') {
-            await pc.setLocalDescription(await pc.createAnswer());
-        }
-    }
-
-    function setupDC() {
-        dc.onopen = () => { document.getElementById('ui').style.display='none'; canvas.style.display='block'; loop(); };
-        dc.onmessage = e => { const d = JSON.parse(e.data); enemy = d.me; enemyBullets = d.bullets; };
-    }
-
-    let me = {x: 100, y: 300, a: 0, c: '#0f0'};
-    let enemy = {x: 700, y: 300, a: 180, c: '#f00'};
-    let myBullets = [], enemyBullets = [];
-    let keys = {};
-    let lastShot = 0;
-
-    window.onkeydown = e => keys[e.code] = true;
+    window.onkeydown = e => { keys[e.code] = true; if(e.code==='KeyE') buildMode=!buildMode; };
     window.onkeyup = e => keys[e.code] = false;
+    canvas.oncontextmenu = e => e.preventDefault();
+
+    canvas.onmousedown = e => {
+        if(!buildMode) return;
+        const r = canvas.getBoundingClientRect();
+        const x = Math.floor((e.clientX-r.left)/size)*size, y = Math.floor((e.clientY-r.top)/size)*size;
+        if(e.button===0) { if(!walls.some(w=>w.x===x&&w.y===y)) walls.push({x,y}); }
+        else if(e.button===2) { walls = walls.filter(w=>w.x!==x||w.y!==y); }
+    };
+
+    function startGame() {
+        timeLeft = parseInt(document.getElementById('dur').value);
+        me.tag = Math.random() > 0.5; enemy.tag = !me.tag;
+        gameActive = true; buildMode = false; boosts = [];
+    }
+
+    function checkW(nx, ny) { return walls.some(w => nx<w.x+size && nx+size>w.x && ny<w.y+size && ny+size>w.y); }
 
     function loop() {
-        if(keys['KeyW']) { me.x += Math.cos(me.a*Math.PI/180)*3; me.y += Math.sin(me.a*Math.PI/180)*3; }
-        if(keys['KeyA']) me.a -= 4; if(keys['KeyD']) me.a += 4;
-        if(keys['Space'] && Date.now() - lastShot > 500) {
-            myBullets.push({x: me.x, y: me.y, a: me.a});
-            lastShot = Date.now();
+        if(gameActive && timeLeft > 0) {
+            let dx = 0, dy = 0;
+            if(keys['KeyW']) dy -= 1; if(keys['KeyS']) dy += 1;
+            if(keys['KeyA']) dx -= 1; if(keys['KeyD']) dx += 1;
+            let s = me.speed; let nx = me.x + dx*s, ny = me.y + dy*s;
+            if(!checkW(nx, me.y)) me.x = Math.max(0, Math.min(800-size, nx));
+            if(!checkW(me.x, ny)) me.y = Math.max(0, Math.min(600-size, ny));
+            
+            if(me.tag) me.tTime++;
+            if(isHost) {
+                timeLeft -= 1/60;
+                if(boosts.length === 0 && Math.random() < 0.01) boosts.push({x: Math.random()*750, y: Math.random()*550, type: Math.random()>0.5?'S':'I'});
+            }
+
+            let d = Math.hypot(me.x-enemy.x, me.y-enemy.y);
+            if(d < size) {
+                if(me.tag) { me.tag = false; enemy.tag = true; } else if(enemy.tag) { me.tag = true; enemy.tag = false; }
+                let ax = (me.x-enemy.x)*2.5, ay = (me.y-enemy.y)*2.5;
+                if(!checkW(me.x+ax, me.y+ay)) { me.x += ax; me.y += ay; }
+            }
+
+            boosts = boosts.filter(b => {
+                if(Math.hypot(me.x-b.x, me.y-b.y) < size) {
+                    if(b.type==='S') { me.speed=8; setTimeout(()=>me.speed=4, 5000); } else { me.inv=300; }
+                    return false;
+                } return true;
+            });
+            if(me.inv > 0) me.inv--;
         }
 
-        myBullets.forEach((b, i) => {
-            b.x += Math.cos(b.a*Math.PI/180)*7; b.y += Math.sin(b.a*Math.PI/180)*7;
-            if(b.x<0||b.x>800||b.y<0||b.y>600) myBullets.splice(i, 1);
-        });
-
-        if(dc && dc.readyState === 'open') dc.send(JSON.stringify({me, bullets: myBullets}));
+        if(isHost && dc && dc.readyState==='open') dc.send(JSON.stringify({p:me, w:walls, b:boosts, t:timeLeft, ga:gameActive}));
+        else if(dc && dc.readyState==='open') dc.send(JSON.stringify({p:me}));
 
         ctx.clearRect(0,0,800,600);
-        drawTank(me); drawTank(enemy);
-        ctx.fillStyle = '#fff';
-        myBullets.concat(enemyBullets).forEach(b => ctx.fillRect(b.x, b.y, 4, 4));
-        requestAnimationFrame(loop);
-    }
+        ctx.strokeStyle='#222'; for(let i=0;i<800;i+=size) for(let j=0;j<600;j+=size) ctx.strokeRect(i,j,size,size);
+        walls.forEach(w => { ctx.fillStyle='#555'; ctx.fillRect(w.x,w.y,size,size); });
+        boosts.forEach(b => { ctx.fillStyle=b.type==='S'?'#ff0':'#0ff'; ctx.fillRect(b.x,b.y,20,20); ctx.fillStyle='#000'; ctx.fillText(b.type,b.x+5,b.y+15); });
 
-    function drawTank(t) {
-        ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.a*Math.PI/180);
-        ctx.fillStyle = t.c; ctx.fillRect(-15,-10,30,20); ctx.fillStyle = '#fff'; ctx.fillRect(12,-2,8,4);
-        ctx.restore();
+        if(me.inv<=0) { ctx.fillStyle = (gameActive && me.tag)?'#fff':me.color; ctx.fillRect(me.x, me.y, size, size); }
+        if(enemy.inv<=0) { ctx.fillStyle = (gameActive && enemy.tag)?'#fff':enemy.color; ctx.fillRect(enemy.x, enemy.y, size, size); }
+
+        document.getElementById('timer').innerText = Math.ceil(timeLeft);
+        document.getElementById('myT').innerText = Math.floor(me.tTime/60);
+        document.getElementById('enT').innerText = Math.floor(enemy.tTime/60);
+        requestAnimationFrame(loop);
     }
 </script>
 </body>
