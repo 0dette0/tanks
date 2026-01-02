@@ -2,10 +2,10 @@
 <html lang='ru'>
 <head>
     <meta charset='UTF-8'>
-    <title>H&S_STABLE</title>
+    <title>H&S_FINAL_FIX</title>
     <style>
         body { background: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin: 0; }
-        #ui { background: #222; padding: 10px; width: 100%; display: flex; justify-content: space-around; border-bottom: 2px solid #444; position: sticky; top: 0; }
+        #ui { background: #222; padding: 10px; width: 100%; display: flex; justify-content: space-around; border-bottom: 2px solid #444; position: sticky; top: 0; z-index: 10; }
         #setup { background: #333; padding: 20px; border: 2px solid #555; margin-top: 20px; text-align: center; }
         textarea { width: 250px; height: 60px; margin: 10px; font-size: 10px; background: #000; color: #0f0; border: 1px solid #555; }
         canvas { background: #000; border: 3px solid #333; margin: 10px 0; }
@@ -16,14 +16,12 @@
 <body>
 
 <div id='setup'>
-    <h3>P2P STABLE CONNECTION</h3>
-    <div style='display:flex; flex-direction:column; align-items:center;'>
-        <button class='btn' onclick='initHost()'>1. HOST (GENERATE OFFER)</button>
-        <textarea id='outCode' readonly placeholder='STEP 1: Copy this after it appears'></textarea>
-        <textarea id='inCode' placeholder='STEP 2: Paste enemy code here'></textarea>
-        <button class='btn' onclick='connect()'>2. CONNECT / ACCEPT</button>
-        <button class='btn' onclick='debugMode()' style='margin-top:10px; background:#422;'>SOLO TEST</button>
-    </div>
+    <h3>P2P CONNECTION</h3>
+    <button class='btn' onclick='initHost()'>1. HOST</button>
+    <textarea id='outCode' readonly placeholder='YOUR CODE'></textarea>
+    <textarea id='inCode' placeholder='PASTE ENEMY CODE'></textarea>
+    <button class='btn' onclick='connect()'>2. CONNECT</button>
+    <button class='btn' onclick='debugMode()' style='display:block; margin: 10px auto; background:#422;'>SOLO DEBUG</button>
 </div>
 
 <div id='ui' style='display:none'>
@@ -31,7 +29,7 @@
     <div>ME: <span id='myT'>0</span>s</div>
     <div>ENEMY: <span id='enT'>0</span>s</div>
     <div id='hCtrl' style='display:none'>
-        <button class='btn' onclick='startGame()'>START ROUND</button>
+        <button class='btn' onclick='startGame()' style='background:#242'>START GAME</button>
     </div>
 </div>
 
@@ -43,41 +41,27 @@
     let dc, isHost = false, gameActive = false, buildMode = true, isDebug = false;
     let walls = [], boosts = [], timeLeft = 0, size = 30;
 
-    pc.onicecandidate = e => {
-        if (!e.candidate) {
-            document.getElementById('outCode').value = btoa(JSON.stringify(pc.localDescription));
-            console.log('Candidate gathering finished.');
-        }
-    };
-
+    pc.onicecandidate = e => { if (!e.candidate) document.getElementById('outCode').value = btoa(JSON.stringify(pc.localDescription)); };
     pc.ondatachannel = e => { dc = e.channel; setupDC(); };
 
-    async function initHost() {
-        isHost = true;
-        dc = pc.createDataChannel('game');
-        setupDC();
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-    }
-
+    async function initHost() { isHost = true; dc = pc.createDataChannel('game'); setupDC(); const offer = await pc.createOffer(); await pc.setLocalDescription(offer); }
     async function connect() {
-        const val = document.getElementById('inCode').value.trim();
-        if(!val) return;
-        const desc = new RTCSessionDescription(JSON.parse(atob(val)));
-        await pc.setRemoteDescription(desc);
-        if(desc.type === 'offer') {
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-        }
+        const val = document.getElementById('inCode').value.trim(); if(!val) return;
+        const desc = new RTCSessionDescription(JSON.parse(atob(val))); await pc.setRemoteDescription(desc);
+        if(desc.type === 'offer') { const answer = await pc.createAnswer(); await pc.setLocalDescription(answer); }
     }
 
     function setupDC() {
-        dc.onopen = () => { document.getElementById('setup').style.display='none'; document.getElementById('ui').style.display='flex'; loop(); };
+        dc.onopen = () => {
+            document.getElementById('setup').style.display='none';
+            document.getElementById('ui').style.display='flex';
+            if(isHost) document.getElementById('hCtrl').style.display='block';
+            loop();
+        };
         dc.onmessage = e => {
             const d = JSON.parse(e.data);
             if(d.p) enemy = d.p;
             if(d.w) walls = d.w;
-            if(d.b) boosts = d.b;
             if(d.t !== undefined) timeLeft = d.t;
             if(d.ga !== undefined) gameActive = d.ga;
         };
@@ -85,8 +69,8 @@
 
     function debugMode() { isDebug = true; isHost = true; document.getElementById('setup').style.display='none'; document.getElementById('ui').style.display='flex'; document.getElementById('hCtrl').style.display='block'; loop(); }
 
-    let me = {x: 50, y: 50, tag: false, tTime: 0, speed: 4, inv: 0, color: '#0f0'};
-    let enemy = {x: -100, y: -100, tag: false, tTime: 0, inv: 0, color: '#f00'};
+    let me = {x: 50, y: 50, tag: false, tTime: 0, speed: 4, color: '#0f0'};
+    let enemy = {x: 720, y: 520, tag: false, tTime: 0, color: '#f00'};
     const keys = {};
 
     window.onkeydown = e => { keys[e.code] = true; if(e.code==='KeyE' && isHost) buildMode=!buildMode; };
@@ -96,8 +80,7 @@
         if(!buildMode || !isHost) return;
         const r = canvas.getBoundingClientRect();
         const x = Math.floor((e.clientX-r.left)/size)*size, y = Math.floor((e.clientY-r.top)/size)*size;
-        if(e.button===0) walls.push({x,y});
-        else if(e.button===2) walls = walls.filter(w=>w.x!==x||w.y!==y);
+        if(e.button===0) walls.push({x,y}); else if(e.button===2) walls = walls.filter(w=>w.x!==x||w.y!==y);
     };
 
     function startGame() { timeLeft = 60; me.tag = Math.random() > 0.5; enemy.tag = !me.tag; gameActive = true; buildMode = false; }
@@ -109,8 +92,8 @@
             if(keys['KeyW']) dy -= 1; if(keys['KeyS']) dy += 1;
             if(keys['KeyA']) dx -= 1; if(keys['KeyD']) dx += 1;
             let nx = me.x + dx*me.speed, ny = me.y + dy*me.speed;
-            if(!checkW(nx, me.y)) me.x = Math.max(0, Math.min(800-size, nx));
-            if(!checkW(me.x, ny)) me.y = Math.max(0, Math.min(600-size, ny));
+            if(!checkW(nx, me.y)) me.x = Math.max(0, Math.min(canvas.width-size, nx));
+            if(!checkW(me.x, ny)) me.y = Math.max(0, Math.min(canvas.height-size, ny));
             if(me.tag) me.tTime++;
             if(isHost) { timeLeft -= 1/60; if(timeLeft <= 0) gameActive=false; }
             if(Math.hypot(me.x-enemy.x, me.y-enemy.y) < size) {
@@ -118,11 +101,18 @@
                 me.x += (me.x-enemy.x)*2; me.y += (me.y-enemy.y)*2;
             }
         }
-        if(dc && dc.readyState==='open') dc.send(JSON.stringify({p:me, w:walls, b:boosts, t:timeLeft, ga:gameActive}));
+
+        if(dc && dc.readyState==='open') dc.send(JSON.stringify({p:me, w:walls, t:timeLeft, ga:gameActive}));
+
         ctx.clearRect(0,0,800,600);
+        ctx.strokeStyle='#222'; for(let i=0;i<800;i+=size) for(let j=0;j<600;j+=size) ctx.strokeRect(i,j,size,size);
         walls.forEach(w => { ctx.fillStyle='#555'; ctx.fillRect(w.x,w.y,size,size); });
+        
         ctx.fillStyle = (gameActive && me.tag)?'#fff':me.color; ctx.fillRect(me.x, me.y, size, size);
-        ctx.fillStyle = (gameActive && enemy.tag)?'#fff':enemy.color; ctx.fillRect(enemy.x, enemy.y, size, size);
+        if(!isDebug || gameActive) {
+            ctx.fillStyle = (gameActive && enemy.tag)?'#fff':enemy.color; ctx.fillRect(enemy.x, enemy.y, size, size);
+        }
+
         document.getElementById('timer').innerText = Math.max(0, Math.ceil(timeLeft));
         document.getElementById('myT').innerText = Math.floor(me.tTime/60);
         document.getElementById('enT').innerText = Math.floor(enemy.tTime/60);
