@@ -2,11 +2,11 @@
 <html lang='ru'>
 <head>
     <meta charset='UTF-8'>
-    <title>HideAndSeek_Refined</title>
+    <title>HideAndSeek_P2P_Fixed</title>
     <style>
         body { background: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin: 0; overflow: hidden; }
-        #ui { background: #222; padding: 10px; width: 100%; display: flex; justify-content: space-around; border-bottom: 2px solid #444; }
-        #setup { position: absolute; top: 30%; background: #333; padding: 20px; border: 2px solid #555; z-index: 1000; text-align: center; }
+        #ui { background: #222; padding: 10px; width: 100%; display: flex; justify-content: space-around; border-bottom: 2px solid #444; z-index: 10; }
+        #setup { position: absolute; top: 20%; background: #333; padding: 20px; border: 2px solid #555; z-index: 1000; text-align: center; }
         textarea { width: 160px; height: 40px; margin: 5px; font-size: 10px; }
         canvas { background: #000; border: 3px solid #333; margin-top: 10px; }
         .btn { background: #444; color: #fff; border: 1px solid #777; padding: 10px; cursor: pointer; }
@@ -47,18 +47,29 @@
     async function initHost() { isHost = true; dc = pc.createDataChannel('game'); setupDC(); await pc.setLocalDescription(await pc.createOffer()); document.getElementById('hCtrl').style.display='block'; }
     async function connect() { const v = document.getElementById('inCode').value; if(!v) return; const d = new RTCSessionDescription(JSON.parse(atob(v))); await pc.setRemoteDescription(d); if(d.type === 'offer') await pc.setLocalDescription(await pc.createAnswer()); }
     function debugMode() { isDebug = true; isHost = true; document.getElementById('setup').style.display='none'; document.getElementById('ui').style.display='flex'; document.getElementById('hCtrl').style.display='block'; loop(); }
-    function setupDC() { dc.onopen = () => { document.getElementById('setup').style.display='none'; document.getElementById('ui').style.display='flex'; loop(); }; dc.onmessage = e => { const d = JSON.parse(e.data); enemy = d.p; walls = d.w; boosts = d.b; timeLeft = d.t; gameActive = d.ga; }; }
+    
+    function setupDC() {
+        dc.onopen = () => { document.getElementById('setup').style.display='none'; document.getElementById('ui').style.display='flex'; loop(); };
+        dc.onmessage = e => {
+            const d = JSON.parse(e.data);
+            if(d.p) enemy = d.p;
+            if(d.w) walls = d.w;
+            if(d.b) boosts = d.b;
+            if(d.t !== undefined) timeLeft = d.t;
+            if(d.ga !== undefined) gameActive = d.ga;
+        };
+    }
 
     let me = {x: 100, y: 100, tag: false, tTime: 0, speed: 4, inv: 0, color: '#0f0'};
     let enemy = {x: 600, y: 400, tag: false, tTime: 0, inv: 0, color: '#f00'};
     const keys = {};
 
-    window.onkeydown = e => { keys[e.code] = true; if(e.code==='KeyE') buildMode=!buildMode; };
+    window.onkeydown = e => { keys[e.code] = true; if(e.code==='KeyE' && isHost) buildMode=!buildMode; };
     window.onkeyup = e => keys[e.code] = false;
     canvas.oncontextmenu = e => e.preventDefault();
 
     canvas.onmousedown = e => {
-        if(!buildMode) return;
+        if(!buildMode || !isHost) return;
         const r = canvas.getBoundingClientRect();
         const x = Math.floor((e.clientX-r.left)/size)*size, y = Math.floor((e.clientY-r.top)/size)*size;
         if(e.button===0) { if(!walls.some(w=>w.x===x&&w.y===y)) walls.push({x,y}); }
@@ -85,13 +96,15 @@
             if(me.tag) me.tTime++;
             if(isHost) {
                 timeLeft -= 1/60;
+                if(timeLeft <= 0) gameActive = false;
                 if(boosts.length === 0 && Math.random() < 0.01) boosts.push({x: Math.random()*750, y: Math.random()*550, type: Math.random()>0.5?'S':'I'});
             }
 
             let d = Math.hypot(me.x-enemy.x, me.y-enemy.y);
             if(d < size) {
-                if(me.tag) { me.tag = false; enemy.tag = true; } else if(enemy.tag) { me.tag = true; enemy.tag = false; }
-                let ax = (me.x-enemy.x)*2.5, ay = (me.y-enemy.y)*2.5;
+                if(me.tag) { me.tag = false; enemy.tag = true; } 
+                else if(enemy.tag) { me.tag = true; enemy.tag = false; }
+                let ax = (me.x-enemy.x)*2, ay = (me.y-enemy.y)*2;
                 if(!checkW(me.x+ax, me.y+ay)) { me.x += ax; me.y += ay; }
             }
 
@@ -104,18 +117,20 @@
             if(me.inv > 0) me.inv--;
         }
 
-        if(isHost && dc && dc.readyState==='open') dc.send(JSON.stringify({p:me, w:walls, b:boosts, t:timeLeft, ga:gameActive}));
-        else if(dc && dc.readyState==='open') dc.send(JSON.stringify({p:me}));
+        if(dc && dc.readyState==='open') {
+            if(isHost) dc.send(JSON.stringify({p:me, w:walls, b:boosts, t:timeLeft, ga:gameActive}));
+            else dc.send(JSON.stringify({p:me}));
+        }
 
         ctx.clearRect(0,0,800,600);
         ctx.strokeStyle='#222'; for(let i=0;i<800;i+=size) for(let j=0;j<600;j+=size) ctx.strokeRect(i,j,size,size);
         walls.forEach(w => { ctx.fillStyle='#555'; ctx.fillRect(w.x,w.y,size,size); });
-        boosts.forEach(b => { ctx.fillStyle=b.type==='S'?'#ff0':'#0ff'; ctx.fillRect(b.x,b.y,20,20); ctx.fillStyle='#000'; ctx.fillText(b.type,b.x+5,b.y+15); });
+        boosts.forEach(b => { ctx.fillStyle=b.type==='S'?'#ff0':'#0ff'; ctx.fillRect(b.x,b.y,20,20); });
 
         if(me.inv<=0) { ctx.fillStyle = (gameActive && me.tag)?'#fff':me.color; ctx.fillRect(me.x, me.y, size, size); }
         if(enemy.inv<=0) { ctx.fillStyle = (gameActive && enemy.tag)?'#fff':enemy.color; ctx.fillRect(enemy.x, enemy.y, size, size); }
 
-        document.getElementById('timer').innerText = Math.ceil(timeLeft);
+        document.getElementById('timer').innerText = Math.max(0, Math.ceil(timeLeft));
         document.getElementById('myT').innerText = Math.floor(me.tTime/60);
         document.getElementById('enT').innerText = Math.floor(enemy.tTime/60);
         requestAnimationFrame(loop);
